@@ -54,16 +54,17 @@ export function parseClaudeResult(args: ParseArgs): ClaudeResult {
     // non-JSON output; handled below
   }
 
-  const parsedStr =
-    parsed && typeof parsed === 'object' ? JSON.stringify(parsed) : '';
+  const parsedIsError =
+    parsed !== null &&
+    typeof parsed === 'object' &&
+    (parsed as { is_error?: unknown }).is_error === true;
 
-  const looksLikeAuth =
+  if (
     AUTH_SIGNALS.test(stderr) ||
-    AUTH_SIGNALS.test(parsedStr) ||
-    exitCode === 401;
-
-  if (looksLikeAuth) {
-    const detail = (stderr || parsedStr || stdout).slice(0, 300);
+    exitCode === 401 ||
+    (parsedIsError && AUTH_SIGNALS.test(JSON.stringify(parsed)))
+  ) {
+    const detail = (stderr || stdout).slice(0, 300);
     return { ok: false, kind: 'auth_dead', detail };
   }
 
@@ -86,6 +87,9 @@ export function parseClaudeResult(args: ParseArgs): ClaudeResult {
   ) {
     const p = parsed as { result: string; session_id: string; is_error?: boolean };
     if (p.is_error === true) {
+      if (AUTH_SIGNALS.test(p.result)) {
+        return { ok: false, kind: 'auth_dead', detail: p.result.slice(0, 300) };
+      }
       return {
         ok: false,
         kind: 'process_error',

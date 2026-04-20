@@ -110,4 +110,20 @@ describe('parseClaudeResult', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.kind).toBe('process_error');
   });
+
+  it('does NOT flag auth_dead when successful reply mentions oauth', () => {
+    const r = parseClaudeResult({
+      stdout: JSON.stringify({
+        result: 'Your oauth token looks fine — 401 errors were a false positive.',
+        session_id: 'sess-y',
+        is_error: false,
+      }),
+      stderr: '',
+      exitCode: 0,
+      timedOut: false,
+      elapsedMs: 10,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.sessionId).toBe('sess-y');
+  });
 });
