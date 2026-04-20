@@ -7,7 +7,7 @@ const ConfigSchema = z.object({
   OWNER_DISCORD_ID: z.string().regex(/^\d{17,20}$/, 'expected 17-20 digit Discord snowflake'),
   CLAUDE_BIN: z.string().default('/root/.local/bin/claude'),
   POLL_INTERVAL_MS: z.coerce.number().int().positive().default(600_000),
-  CLAUDE_TIMEOUT_MS: z.coerce.number().int().positive().default(180_000),
+  CLAUDE_TIMEOUT_MS: z.coerce.number().int().positive().default(21_600_000),
   SESSIONS_DB_PATH: z.string().default('./data/sessions.db'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   AUTH_ALERT_DEDUPE_MS: z.coerce.number().int().positive().default(300_000),

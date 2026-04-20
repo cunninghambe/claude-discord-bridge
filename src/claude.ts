@@ -20,6 +20,21 @@ export type RunClaudeOptions = {
 const AUTH_SIGNALS =
   /oauth|unauthori[sz]ed|authentication|401|403|invalid.*(?:token|api[_ -]?key|credential)/i;
 
+const ALLOWED_TOOLS = [
+  'Bash',
+  'Edit',
+  'Write',
+  'Read',
+  'Grep',
+  'Glob',
+  'ToolSearch',
+  'WebFetch',
+  'WebSearch',
+  'TodoWrite',
+  'mcp__spoonworks__*',
+  'mcp__paperclip__*',
+].join(' ');
+
 type ParseArgs = {
   stdout: string;
   stderr: string;
@@ -90,7 +105,14 @@ export function parseClaudeResult(args: ParseArgs): ClaudeResult {
 }
 
 export async function runClaude(opts: RunClaudeOptions): Promise<ClaudeResult> {
-  const args: string[] = ['-p', '--output-format=json'];
+  const args: string[] = [
+    '-p',
+    '--output-format=json',
+    '--permission-mode',
+    'default',
+    '--allowed-tools',
+    ALLOWED_TOOLS,
+  ];
   if (opts.sessionId) {
     args.push('--resume', opts.sessionId);
   } else {
