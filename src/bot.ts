@@ -6,6 +6,7 @@ import {
   Partials,
   type Message,
 } from 'discord.js';
+import { downloadAttachments, formatManifest, sweepOldAttachments } from './attachments.js';
 import { chunkForDiscord } from './chunking.js';
 import { runClaude } from './claude.js';
 import type { Config } from './config.js';
@@ -100,9 +101,31 @@ export function createBot(deps: Deps): Bot {
       }
     }, 8_000);
 
+    const download = await downloadAttachments({
+      messageId: msg.id,
+      attachments: Array.from(msg.attachments.values()).map((a) => ({
+        id: a.id,
+        url: a.url,
+        name: a.name,
+        contentType: a.contentType,
+        size: a.size,
+      })),
+    });
+    if (download.files.length > 0) {
+      logger.info(
+        {
+          messageId: msg.id,
+          attachmentCount: download.files.length,
+          successes: download.files.filter((f) => f.ok).length,
+        },
+        'downloaded discord attachments',
+      );
+    }
+    const prompt = formatManifest(download) + msg.content;
+
     try {
       const result = await runClaude({
-        prompt: msg.content,
+        prompt,
         sessionId: existing?.claudeSessionId ?? null,
         timeoutMs: config.CLAUDE_TIMEOUT_MS,
         claudeBin: config.CLAUDE_BIN,
@@ -144,10 +167,19 @@ export function createBot(deps: Deps): Bot {
   }
 
   async function handleMessage(msg: Message): Promise<void> {
+    logger.info(
+      {
+        authorId: msg.author.id,
+        bot: msg.author.bot,
+        isDM: msg.guildId === null,
+        contentLen: msg.content.length,
+      },
+      'message received',
+    );
     if (msg.author.bot) return;
     if (msg.guildId !== null) return;
     if (msg.author.id !== config.OWNER_DISCORD_ID) {
-      logger.debug({ userId: msg.author.id }, 'ignoring non-owner DM');
+      logger.warn({ userId: msg.author.id }, 'ignoring non-owner DM');
       return;
     }
 
@@ -199,8 +231,22 @@ export function createBot(deps: Deps): Bot {
     await dmOwner('Claude auth recovered.');
   }
 
+  const ATTACHMENT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+  const ATTACHMENT_BASE_DIR = '/root/claude-bridge-data/attachments';
+
   return {
     async start() {
+      sweepOldAttachments(ATTACHMENT_BASE_DIR, ATTACHMENT_TTL_MS)
+        .then((r) =>
+          logger.info(
+            { removed: r.removedDirs.length, kept: r.kept, baseDir: ATTACHMENT_BASE_DIR },
+            'swept old attachment dirs',
+          ),
+        )
+        .catch((err: unknown) =>
+          logger.warn({ err }, 'attachment sweep failed; continuing'),
+        );
+
       client.on(Events.MessageCreate, (msg) => {
         handleMessage(msg as Message).catch((err: unknown) => {
           logger.error({ err }, 'message handler failed');
@@ -211,9 +257,17 @@ export function createBot(deps: Deps): Bot {
           { tag: c.user.tag, ownerId: config.OWNER_DISCORD_ID },
           'discord gateway ready',
         );
+        dmOwner('bridge-online self-test').then(
+          () => logger.info('startup self-test DM delivered'),
+          (err: unknown) =>
+            logger.error({ err: String(err) }, 'startup self-test DM FAILED'),
+        );
       });
       client.on(Events.Error, (err) => {
         logger.error({ err }, 'discord client error');
+      });
+      client.on(Events.Warn, (info) => {
+        logger.warn({ info }, 'discord warn');
       });
       await client.login(config.DISCORD_BOT_TOKEN);
     },
