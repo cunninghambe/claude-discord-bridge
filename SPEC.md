@@ -132,10 +132,30 @@ claude-discord-bridge/
 
 **Design pattern** — plain async functions, no classes, no DI framework. State lives in two places: SQLite (sessions) and in-process per-user request queues (map).
 
-## Open Questions (must resolve before implementation)
+## Spike Findings (2026-04-20)
 
-1. **How does `claude login` behave on a headless server?** Does it print a URL to stdout that can be opened from any browser (like `gh auth login --web`), or does it require a local browser? This determines whether the watchdog's DM'd login URL can actually complete OAuth from the owner's phone, or whether we need a different recovery mechanism (e.g., a tunneled callback server). **Needs empirical test on this server before coding.**
-2. **How does `claude -p` signal auth death?** Specific exit code? Recognizable stderr string? Determines the `auth_dead` detection logic in `runClaude`.
-3. **Does `claude -p --resume <id>` work across server restarts,** or is the session only resumable within the same shell/process tree?
+All three open questions resolved. Findings reshape the auth strategy:
 
-These three answers shape the auth-recovery path. Proposal: resolve them via a 30-minute discovery spike *before* writing production code.
+1. **`claude setup-token` creates a 1-year long-lived token** backed by the Claude subscription (not API billing). Interactive browser needed *once* on any device (owner's laptop); resulting token is set as `CLAUDE_CODE_OAUTH_TOKEN` env var on the server. **This is the primary auth mechanism.** The "auth dies every few hours" problem is an artifact of the short-lived interactive OAuth session — `setup-token` sidesteps it entirely.
+2. **`claude auth status` returns structured JSON** — `{ loggedIn, authMethod, apiProvider, email, subscriptionType, ... }`. This is the watchdog's liveness probe. No stderr string parsing required.
+3. **`claude -p --resume <id>` works across fully isolated processes.** Verified empirically by running one `claude -p` invocation to store a phrase, then resuming with `env -i` (stripped environment) in a separate process — the phrase was recalled correctly. Sessions persist to disk and will survive pm2/server restarts.
+
+### Revised architecture (supersedes auth-recovery plan above)
+
+**Primary path — long-lived token, no recovery needed.** Owner runs `claude setup-token` once on their laptop, copies the resulting token into the server's `.env` as `CLAUDE_CODE_OAUTH_TOKEN`, pm2 picks it up. Valid for one year.
+
+**Watchdog** — polls `claude auth status --output-format=json` (or the plain `claude auth status` which already returns JSON on this version) every ~10 min. If `loggedIn === false` OR command fails, DM the owner: *"Token expired or revoked. Run `claude setup-token` on any browser machine, then update `CLAUDE_CODE_OAUTH_TOKEN` in server env and `pm2 restart claude-discord-bridge`."* No in-band URL capture, no browser-callback dance.
+
+**Simplified interfaces:**
+```ts
+type AuthStatus = { loggedIn: true; authMethod: string; subscriptionType?: string }
+                | { loggedIn: false; reason?: string };
+
+export async function checkAuth(): Promise<AuthStatus>;  // runs `claude auth status`
+// auth-recovery.ts is deleted — not needed.
+```
+
+**Claude invocation** — `claude -p --session-id <uuid> --output-format=json "<prompt>"` for the first turn, `claude -p --resume <uuid> --output-format=json "<prompt>"` for subsequent turns. Session IDs generated with `crypto.randomUUID()` and stored in SQLite keyed by Discord user.
+
+### Updated file list
+Remove `src/auth-recovery.ts` from the layout. Everything else stands.
