@@ -86,12 +86,10 @@ export function createBot(deps: Deps): Bot {
     const userId = msg.author.id;
     const existing = store.get(userId);
 
-    try {
-      if ('sendTyping' in msg.channel) {
-        await msg.channel.sendTyping();
-      }
-    } catch (err) {
-      logger.debug({ err }, 'initial sendTyping failed');
+    if ('sendTyping' in msg.channel) {
+      msg.channel.sendTyping().catch((err) => {
+        logger.debug({ err }, 'initial sendTyping failed');
+      });
     }
     const typingTimer = setInterval(() => {
       if ('sendTyping' in msg.channel) {

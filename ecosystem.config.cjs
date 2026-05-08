@@ -9,7 +9,8 @@ module.exports = {
       min_uptime: '10s',
       watch: false,
       env: {
-        NODE_ENV: 'production'
+        NODE_ENV: 'production',
+        LOG_LEVEL: 'debug'
       }
     }
   ]
